@@ -1,0 +1,10 @@
+[[index]]
+url = "https://pypi.ci.artifacts.walmart.com/artifactory/api/pypi/mlplatforms-pypi/simple"
+default = true
+
+[[index]]
+name = "walmart-nexus"
+url = "https://repository.walmart.com/repository/pypi-proxy/simple/"
+explicit = true
+
+concurrent-downloads = 20
