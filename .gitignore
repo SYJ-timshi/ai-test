@@ -17,3 +17,4 @@ wheels/
 # uv lock (per-project)
 **/uv.lock
 examples
+.vscode
