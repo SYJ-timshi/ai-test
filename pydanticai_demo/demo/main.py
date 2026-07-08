@@ -6,6 +6,8 @@ Run:
     uv run demo/main.py --provider openai                 # OpenAI + native
     uv run demo/main.py --provider deepseek               # DeepSeek + native
     uv run demo/main.py --backend wmt                     # WmtAgent (no MCP)
+    uv run demo/main.py --mcp http                        # HTTP MCP only (start mcp_server_http.py first)
+    uv run demo/main.py --mcp both                        # stdio + HTTP simultaneously
 
 Required env vars (.env):
     WMT_API_KEY / WMT_USER_EMAIL   (walmart)
@@ -29,7 +31,7 @@ from demo.schemas import OrchestratorResult
 
 _log = get_logger("ORCH")
 
-DEMO_PROMPT = """\
+WELCOME_PROMPT = """\
 Please complete ALL of the following in one response:
 1. What is the current UTC time? (use MCP: get_current_time)
 2. Calculate: 42 * 1337  (use calculate tool)
@@ -50,25 +52,7 @@ def _parse_arg(flag: str, default: str) -> str:
     return default
 
 
-async def main() -> None:
-    provider = _parse_arg("--provider", "walmart")
-    backend  = _parse_arg("--backend",  "native")
-    _log.debug(f"Initialising  provider={provider!r}  backend={backend!r}")
-
-    model        = create_model(provider)
-    orchestrator = build_orchestrator(model, backend=backend)
-
-    print(f"\n{'═' * 62}")
-    print(f"  PydanticAI Full-Capability Demo   provider={provider}  backend={backend}")
-    print(f"{'═' * 62}\n")
-    print(f"Prompt:\n{DEMO_PROMPT}")
-    print("─" * 62)
-
-    _log.debug("Starting orchestrator ...")
-    async with orchestrator:
-        result = await orchestrator.run(DEMO_PROMPT)
-    _log.debug("Run complete")
-
+def _print_result(result) -> None:
     out: OrchestratorResult = result.output
     print("\n✅  RESULT")
     print("─" * 62)
@@ -76,10 +60,60 @@ async def main() -> None:
     print("\n🔧  STEPS USED")
     for step in out.steps_used:
         print(f"  • {step}")
-
-    # usage attr differs between native (pydantic-ai) and wmt (dict)
     usage = result.usage if isinstance(result.usage, dict) else result.usage
     print(f"\n📊  Token usage: {usage}")
+
+
+async def main() -> None:
+    provider      = _parse_arg("--provider", "walmart")
+    backend       = _parse_arg("--backend",  "native")
+    mcp_transport = _parse_arg("--mcp",      "stdio")
+    _log.debug(
+        f"Initialising  provider={provider!r}  backend={backend!r}"
+        f"  mcp={mcp_transport!r}"
+    )
+
+    model        = create_model(provider)
+    orchestrator = build_orchestrator(model, backend=backend, mcp_transport=mcp_transport)
+
+    print(f"\n{'═' * 62}")
+    print(f"  PydanticAI Full-Capability Demo   provider={provider}  backend={backend}  mcp={mcp_transport}")
+    print(f"{'═' * 62}\n")
+    # print(f"Welcome prompt:\n{WELCOME_PROMPT}")
+    print("─" * 62)
+
+    message_history = None
+
+    _log.debug("Starting orchestrator ...")
+    async with orchestrator:
+        # 首轮：运行欢迎演示 prompt
+        _log.debug("Running welcome prompt ...")
+        # result = await orchestrator.run(WELCOME_PROMPT)
+        # _print_result(result)
+        # message_history = result.all_messages()
+        message_history = list()
+        # 持续监听用户输入
+        print(f"\n{'─' * 62}")
+        print("  Chat mode — type your message (exit/quit/Ctrl+D to stop)")
+        print(f"{'─' * 62}")
+
+        while True:
+            try:
+                user_input = (await asyncio.to_thread(input, "\n> ")).strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nBye!")
+                break
+
+            if user_input.lower() in {"", "exit", "quit"}:
+                print("Bye!")
+                break
+
+            _log.debug(f"User input: {user_input!r}")
+            result = await orchestrator.run(user_input, message_history=message_history)
+            _print_result(result)
+            message_history = result.all_messages()
+
+    _log.debug("Session ended")
 
 
 if __name__ == "__main__":

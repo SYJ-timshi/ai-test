@@ -1,6 +1,6 @@
 """DeepSeek model factory — uses DeepSeek's OpenAI-compatible API.
 
-DeepSeek exposes an OpenAI-compatible endpoint, so we use OpenAIModel +
+DeepSeek exposes an OpenAI-compatible endpoint, so we use OpenAIChatModel +
 OpenAIProvider with a custom base_url and DEEPSEEK_API_KEY.
 
 Available models:
@@ -13,7 +13,7 @@ Required env vars (.env):
 import os
 
 from dotenv import load_dotenv
-from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 load_dotenv()
@@ -21,7 +21,7 @@ load_dotenv()
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 
 
-def create_deepseek_model(model_name: str = "deepseek-chat") -> OpenAIModel:
+def create_deepseek_model(model_name: str = "deepseek-chat") -> OpenAIChatModel:
     """Return an OpenAIModel routed to DeepSeek's API.
 
     Args:
@@ -38,4 +38,4 @@ def create_deepseek_model(model_name: str = "deepseek-chat") -> OpenAIModel:
         base_url=DEEPSEEK_BASE_URL,
         api_key=api_key,
     )
-    return OpenAIModel(model_name, provider=provider)
+    return OpenAIChatModel(model_name, provider=provider)

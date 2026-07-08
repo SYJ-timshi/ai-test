@@ -36,6 +36,8 @@ from pydantic_ai.toolsets import AbstractToolset, FunctionToolset
 
 Backend = Literal["native", "wmt"]
 
+# MCPToolset ⊂ AbstractToolset, so existing callers passing MCPToolset are unaffected.
+
 
 @dataclass
 class AgentBuilder:
@@ -53,9 +55,9 @@ class AgentBuilder:
     instructions: str = ""
     deps_type: Any = type(None)
 
-    _tools:       list[Callable]      = field(default_factory=list, init=False, repr=False)
+    _tools:       list[Callable]        = field(default_factory=list, init=False, repr=False)
     _toolsets:    list[AbstractToolset] = field(default_factory=list, init=False, repr=False)
-    _mcp_servers: list[MCPToolset]    = field(default_factory=list, init=False, repr=False)
+    _mcp_servers: list[AbstractToolset] = field(default_factory=list, init=False, repr=False)
 
     # ── fluent API ───────────────────────────────────────────────────────────
 
@@ -69,8 +71,12 @@ class AgentBuilder:
         self._toolsets.append(toolset)
         return self
 
-    def with_mcp(self, server: MCPToolset) -> "AgentBuilder":
-        """Add an MCP server toolset.  Only available with backend='native'."""
+    def with_mcp(self, server: AbstractToolset) -> "AgentBuilder":
+        """Add an MCP server toolset.  Only available with backend='native'.
+
+        Accepts any AbstractToolset subclass: MCPToolset (stdio),
+        MCPServerStreamableHTTP (HTTP), MCPServerSSE (SSE), etc.
+        """
         self._mcp_servers.append(server)
         return self
 
