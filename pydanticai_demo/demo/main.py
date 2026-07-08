@@ -67,7 +67,7 @@ def _print_result(result) -> None:
 async def main() -> None:
     provider      = _parse_arg("--provider", "walmart")
     backend       = _parse_arg("--backend",  "native")
-    mcp_transport = _parse_arg("--mcp",      "stdio")
+    mcp_transport = _parse_arg("--mcp",      "both")
     _log.debug(
         f"Initialising  provider={provider!r}  backend={backend!r}"
         f"  mcp={mcp_transport!r}"

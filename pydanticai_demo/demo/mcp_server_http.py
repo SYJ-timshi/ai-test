@@ -1,25 +1,36 @@
 """FastMCP HTTP server (Streamable HTTP transport) — must be started separately.
 
-Exposes fun / interactive tools NOT available in the stdio server:
-  • roll_dice(sides, count)     — roll N dice with S sides
-  • random_joke(category)       — pre-baked jokes: programming | dad | general
-  • random_quote(mood)          — quotes: motivational | funny | wisdom
-  • word_scramble(text)         — scramble words in a sentence (keeps first/last letter)
+Three MCP capability areas exposed:
+
+  TOOLS (LLM actively calls, may have side-effects):
+    • roll_dice(sides, count)     — roll N dice with S sides
+    • random_joke(category)       — jokes: programming | dad | general
+    • random_quote(mood)          — quotes: motivational | funny | wisdom
+    • word_scramble(text)         — scramble word middles (keep first/last letter)
+
+  RESOURCES (LLM passively reads, always read-only):
+    • cheatsheet://mcp            — MCP protocol quick reference
+    • cheatsheet://pydantic-ai    — pydantic-ai quick reference
+    • stats://server              — live server stats (tool count, uptime)
+
+  PROMPTS (pre-baked prompt templates with arguments):
+    • code_review(language, code) — structured code-review prompt
+    • brainstorm(topic, count)    — idea-generation prompt
+    • explain_like_five(concept)  — ELI5 explanation prompt
 
 IMPORTANT — startup order
 --------------------------
-This server does NOT auto-spawn like the stdio variant.
-You must start it in a separate terminal BEFORE running main.py with --mcp http|both:
-
     Terminal 1:  uv run demo/mcp_server_http.py
     Terminal 2:  uv run demo/main.py --mcp both
 
-Endpoint: http://127.0.0.1:8765/mcp  (Streamable HTTP)
+Endpoint: http://127.0.0.1:8765/mcp
 """
+import datetime
 import logging
 import random
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import TextContent
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -28,11 +39,12 @@ logging.basicConfig(
 )
 _log = logging.getLogger("mcp_server_http")
 
-MCP_PORT = 8765
+MCP_PORT   = 8765
+_START_TIME = datetime.datetime.now(datetime.timezone.utc)
 
 mcp = FastMCP("demo-mcp-http-server", port=MCP_PORT)
 
-# ── data ──────────────────────────────────────────────────────────────────────
+# ── static data ───────────────────────────────────────────────────────────────
 
 _JOKES: dict[str, list[str]] = {
     "programming": [
@@ -82,8 +94,77 @@ _QUOTES: dict[str, list[str]] = {
     ],
 }
 
+_CHEATSHEETS: dict[str, str] = {
+    "mcp": """\
+# MCP (Model Context Protocol) Quick Reference
 
-# ── tools ─────────────────────────────────────────────────────────────────────
+## Three capability areas
+| Area      | Decorator          | Read/Write | Typical use               |
+|-----------|--------------------|------------|---------------------------|
+| Tools     | @mcp.tool()        | R/W        | actions, calculations     |
+| Resources | @mcp.resource(uri) | Read-only  | docs, config, db snapshots|
+| Prompts   | @mcp.prompt()      | Read-only  | reusable prompt templates |
+
+## Transport options
+- stdio            — subprocess, zero config, one client only
+- sse              — HTTP + Server-Sent Events, legacy
+- streamable-http  — HTTP, stateless, multi-client (recommended)
+
+## JSON-RPC flow
+1. Client → tools/list       → server returns schema list
+2. Client → tools/call       → server executes + returns result
+3. Client → resources/list   → server returns URI list
+4. Client → resources/read   → server returns resource content
+5. Client → prompts/list     → server returns template list
+6. Client → prompts/get      → server returns rendered messages
+""",
+    "pydantic-ai": """\
+# pydantic-ai Quick Reference
+
+## Agent creation
+```python
+from pydantic_ai import Agent
+agent = Agent(model, output_type=MySchema, instructions="...", tools=[fn])
+```
+
+## Tool definition
+```python
+def my_tool(ctx: RunContext, x: int) -> str:
+    \"\"\"Tool description shown to the LLM.\"\"\"
+    return str(x * 2)
+```
+
+## MCP integration
+```python
+from pydantic_ai.mcp import MCPToolset, MCPServerStreamableHTTP
+# stdio  (auto-subprocess)
+MCPToolset(PythonStdioTransport(script_path="server.py"))
+# http   (external server)
+MCPServerStreamableHTTP("http://127.0.0.1:8765/mcp")
+```
+
+## Run patterns
+```python
+async with agent:
+    result = await agent.run(prompt)               # one-shot
+    result = await agent.run(msg, message_history=history)  # with history
+```
+
+## AgentBuilder (fluent)
+```python
+agent = (
+    AgentBuilder(model)
+    .with_tool(fn)
+    .with_skill(toolset)
+    .with_mcp(mcp_server)
+    .build(backend="native")   # or "wmt"
+)
+```
+""",
+}
+
+
+# ── TOOLS ────────────────────────────────────────────────────────────────────
 
 @mcp.tool()
 def roll_dice(sides: int = 6, count: int = 1) -> str:
@@ -113,7 +194,7 @@ def random_joke(category: str = "programming") -> str:
     key = category.strip().lower()
     jokes = _JOKES.get(key, _JOKES["programming"])
     joke = random.choice(jokes)
-    _log.debug(f"random_joke(category={key!r}) → {joke[:40]!r}...")
+    _log.debug(f"random_joke(category={key!r})")
     return f"😂 [{key}] {joke}"
 
 
@@ -127,7 +208,7 @@ def random_quote(mood: str = "motivational") -> str:
     key = mood.strip().lower()
     quotes = _QUOTES.get(key, _QUOTES["motivational"])
     quote = random.choice(quotes)
-    _log.debug(f"random_quote(mood={key!r}) → {quote[:40]!r}...")
+    _log.debug(f"random_quote(mood={key!r})")
     return f"💬 [{key}] {quote}"
 
 
@@ -145,13 +226,117 @@ def word_scramble(text: str) -> str:
         random.shuffle(middle)
         return word[0] + "".join(middle) + word[-1]
 
-    words = text.split()
-    scrambled = " ".join(_scramble_word(w) for w in words)
-    _log.debug(f"word_scramble({text!r}) → {scrambled!r}")
-    return f"🔀 Original: {text!r}\n   Scrambled: {scrambled!r}"
+    scrambled = " ".join(_scramble_word(w) for w in text.split())
+    _log.debug(f"word_scramble({text!r})")
+    return f"🔀 Original : {text!r}\n   Scrambled: {scrambled!r}"
 
+
+# ── RESOURCES ────────────────────────────────────────────────────────────────
+# Resources are read-only data the LLM can inspect at any time.
+# URI scheme is arbitrary — just needs to be unique and descriptive.
+
+@mcp.resource("cheatsheet://mcp")
+def resource_mcp_cheatsheet() -> str:
+    """MCP protocol quick-reference cheatsheet."""
+    _log.debug("resource read: cheatsheet://mcp")
+    return _CHEATSHEETS["mcp"]
+
+
+@mcp.resource("cheatsheet://pydantic-ai")
+def resource_pydantic_ai_cheatsheet() -> str:
+    """pydantic-ai library quick-reference cheatsheet."""
+    _log.debug("resource read: cheatsheet://pydantic-ai")
+    return _CHEATSHEETS["pydantic-ai"]
+
+
+@mcp.resource("stats://server")
+def resource_server_stats() -> str:
+    """Live server stats — tool count and uptime."""
+    _log.debug("resource read: stats://server")
+    uptime = datetime.datetime.now(datetime.timezone.utc) - _START_TIME
+    return (
+        f"Server: demo-mcp-http-server\n"
+        f"Port  : {MCP_PORT}\n"
+        f"Uptime: {str(uptime).split('.')[0]}\n"
+        f"Tools : roll_dice, random_joke, random_quote, word_scramble\n"
+        f"Resources: cheatsheet://mcp, cheatsheet://pydantic-ai, stats://server\n"
+        f"Prompts: code_review, brainstorm, explain_like_five\n"
+    )
+
+
+# ── PROMPTS ──────────────────────────────────────────────────────────────────
+# Prompts are reusable message templates.
+# The LLM fetches them via prompts/get and injects the rendered messages into its context.
+
+@mcp.prompt()
+def code_review(language: str, code: str) -> str:
+    """Structured code-review prompt for any language.
+
+    Args:
+        language: Programming language (e.g. python, typescript, java)
+        code:     The code snippet to review
+    """
+    return f"""\
+Please review the following {language} code and provide structured feedback:
+
+```{language}
+{code}
+```
+
+Cover these aspects:
+1. **Correctness** — Does it do what it should? Any bugs?
+2. **Readability** — Is it clear and well-named?
+3. **Performance** — Any obvious inefficiencies?
+4. **Security** — Any vulnerabilities or bad practices?
+5. **Suggestions** — 2-3 concrete improvement ideas.
+
+Be concise and constructive.
+"""
+
+
+@mcp.prompt()
+def brainstorm(topic: str, count: int = 5) -> str:
+    """Idea-generation prompt — produce N distinct ideas for a topic.
+
+    Args:
+        topic: The subject to brainstorm about
+        count: Number of ideas to generate (default 5)
+    """
+    return f"""\
+Generate {count} distinct, creative ideas about: **{topic}**
+
+For each idea provide:
+- A short title (≤ 8 words)
+- One sentence explaining the core concept
+- One sentence on why it's interesting or valuable
+
+Number each idea. Be imaginative and avoid the obvious.
+"""
+
+
+@mcp.prompt()
+def explain_like_five(concept: str) -> str:
+    """ELI5 — explain a concept as if the reader is five years old.
+
+    Args:
+        concept: The technical concept to explain simply
+    """
+    return f"""\
+Explain "{concept}" to a curious five-year-old.
+
+Rules:
+- Use only simple, everyday words (no jargon)
+- Use a relatable analogy or story
+- Keep it under 100 words
+- End with one fun fact that will make them say "wow!"
+"""
+
+
+# ── entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     _log.info(f"MCP HTTP server starting on http://127.0.0.1:{MCP_PORT}/mcp")
-    _log.info("Tools: roll_dice | random_joke | random_quote | word_scramble")
+    _log.info("Tools    : roll_dice | random_joke | random_quote | word_scramble")
+    _log.info("Resources: cheatsheet://mcp | cheatsheet://pydantic-ai | stats://server")
+    _log.info("Prompts  : code_review | brainstorm | explain_like_five")
     mcp.run(transport="streamable-http")
